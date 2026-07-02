@@ -1,0 +1,32 @@
+[workspace]
+members = [
+  "crates/cerberus-cli",
+  "crates/cerberus-core",
+  "crates/cerberus-policy",
+  "crates/cerberus-llm",
+  "crates/cerberus-memory",
+  "crates/cerberus-tools", "crates/cerberus-gateway",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "LicenseRef-Araskova-Proprietary"
+repository = "https://github.com/araskova/cerberus"
+authors = ["Araskova Labs"]
+
+[workspace.dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive", "env"] }
+crossterm = "0.28"
+ratatui = "0.29"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.23", features = ["v4", "serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+teloxide = { version = "0.13", features = ["macros", "rustls"] }
+dialoguer = "0.11"

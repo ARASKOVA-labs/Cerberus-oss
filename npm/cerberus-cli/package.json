@@ -1,0 +1,32 @@
+{
+  "name": "@araskova/cerberus",
+  "version": "0.1.0",
+  "description": "Automated CI/CD AI Security Review & Testing Engine",
+  "main": "bin/cerberus.js",
+  "bin": {
+    "cerberus": "bin/cerberus.js",
+    "cerberus-sec": "bin/cerberus.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/araskova-labs/cerberus.git"
+  },
+  "keywords": [
+    "security",
+    "ai",
+    "owasp",
+    "code-review",
+    "testing"
+  ],
+  "author": "Araskova Labs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "tar": "^6.2.0"
+  }
+}

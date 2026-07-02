@@ -1,0 +1,13 @@
+id = "local-audit"
+title = "Audit local repository"
+objective = "Map the project, identify high-confidence security risks, and propose safe fixes."
+
+[scope]
+root = "."
+allow_active_testing = false
+allow_exploit_validation = false
+
+[policy]
+max_risk = "passive"
+require_evidence = true
+require_approval_for_tools = true
