@@ -6,10 +6,16 @@ Cerberus is an automated AI security review, patching, and testing engine.
 
 Unlike interactive chat bots, Cerberus runs headless in your terminal or CI/CD pipeline. It reads your git diffs, surfaces security vulnerabilities exactly where they happen, **and autonomously patches them on disk.**
 
-## 🚀 Quick Start (Cargo)
+## 🚀 Quick Start
 
-The easiest way to integrate Cerberus into your workflow is via the Rust CLI:
+The easiest way to integrate Cerberus into your workflow is via our NPM package or Cargo:
 
+**Via NPM:**
+```bash
+npm install -g @araskova/cerberus
+```
+
+**Via Cargo:**
 ```bash
 cargo install cerberus-cli
 ```

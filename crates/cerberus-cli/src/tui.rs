@@ -123,7 +123,10 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                 _ => Color::White,
             };
             let content = vec![Line::from(vec![
-                Span::styled(format!("[{}] ", v.severity.to_uppercase()), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("[{}] ", v.severity.to_uppercase()),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(v.file.clone()),
             ])];
             ListItem::new(content)
@@ -131,7 +134,11 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         .collect();
 
     let items = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Vulnerabilities"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Vulnerabilities"),
+        )
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -144,24 +151,35 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
     // Right Panel: Details
     if let Some(i) = app.state.selected() {
         let vuln = &app.vulns[i];
-        
+
         let text = vec![
-            Line::from(Span::styled("Description", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+            Line::from(Span::styled(
+                "Description",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            )),
             Line::from(vuln.description.clone()),
             Line::from(""),
-            Line::from(Span::styled("Remediation", Style::default().add_modifier(Modifier::BOLD).fg(Color::Green))),
+            Line::from(Span::styled(
+                "Remediation",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Green),
+            )),
             Line::from(vuln.remediation.clone()),
             Line::from(""),
-            Line::from(Span::styled("Press 'q' or 'Esc' to exit", Style::default().fg(Color::DarkGray))),
+            Line::from(Span::styled(
+                "Press 'q' or 'Esc' to exit",
+                Style::default().fg(Color::DarkGray),
+            )),
         ];
 
         let block = Block::default()
             .title(format!(" {} ", vuln.file))
             .borders(Borders::ALL);
-        
-        let paragraph = Paragraph::new(text)
-            .block(block)
-            .wrap(Wrap { trim: true });
+
+        let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
 
         f.render_widget(paragraph, chunks[1]);
     }

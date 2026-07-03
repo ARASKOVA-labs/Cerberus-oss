@@ -1,8 +1,8 @@
-use rusqlite::{Connection, Result, params};
+use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvidenceRecord {
@@ -20,15 +20,15 @@ pub struct StateDB {
 impl StateDB {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let conn = Connection::open(path)?;
-        
+
         // Use WAL mode for concurrency
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        
+
         Self::init_schema(&conn)?;
-        
+
         Ok(Self { conn })
     }
-    
+
     fn init_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sessions (
@@ -76,18 +76,23 @@ impl StateDB {
             CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
                 DELETE FROM messages_fts WHERE rowid = old.id;
                 INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
-            END;"
+            END;",
         )?;
         Ok(())
     }
 
     pub fn set_mission(&self, session_id: &str, mission_json: &str) -> Result<()> {
-        self.conn.execute("UPDATE sessions SET mission_data = ?1 WHERE id = ?2", params![mission_json, session_id])?;
+        self.conn.execute(
+            "UPDATE sessions SET mission_data = ?1 WHERE id = ?2",
+            params![mission_json, session_id],
+        )?;
         Ok(())
     }
 
     pub fn get_mission(&self, session_id: &str) -> Result<Option<String>> {
-        let mut stmt = self.conn.prepare("SELECT mission_data FROM sessions WHERE id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT mission_data FROM sessions WHERE id = ?1")?;
         let mut rows = stmt.query(params![session_id])?;
         if let Some(row) = rows.next()? {
             let data: Option<String> = row.get(0)?;
@@ -97,12 +102,17 @@ impl StateDB {
     }
 
     pub fn set_plan(&self, session_id: &str, plan_json: &str) -> Result<()> {
-        self.conn.execute("UPDATE sessions SET plan_data = ?1 WHERE id = ?2", params![plan_json, session_id])?;
+        self.conn.execute(
+            "UPDATE sessions SET plan_data = ?1 WHERE id = ?2",
+            params![plan_json, session_id],
+        )?;
         Ok(())
     }
 
     pub fn get_plan(&self, session_id: &str) -> Result<Option<String>> {
-        let mut stmt = self.conn.prepare("SELECT plan_data FROM sessions WHERE id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT plan_data FROM sessions WHERE id = ?1")?;
         let mut rows = stmt.query(params![session_id])?;
         if let Some(row) = rows.next()? {
             let data: Option<String> = row.get(0)?;
@@ -111,16 +121,23 @@ impl StateDB {
         Ok(None)
     }
 
-    pub fn save_finding(&self, session_id: &str, finding_id: &str, finding_json: &str) -> Result<()> {
+    pub fn save_finding(
+        &self,
+        session_id: &str,
+        finding_id: &str,
+        finding_json: &str,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO findings (id, session_id, data) VALUES (?1, ?2, ?3)",
-            params![finding_id, session_id, finding_json]
+            params![finding_id, session_id, finding_json],
         )?;
         Ok(())
     }
 
     pub fn get_findings(&self, session_id: &str) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT data FROM findings WHERE session_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT data FROM findings WHERE session_id = ?1")?;
         let rows = stmt.query_map(params![session_id], |row| row.get(0))?;
         let mut results = Vec::new();
         for r in rows {
@@ -162,12 +179,10 @@ impl StateDB {
              FROM messages_fts f 
              JOIN messages m ON f.rowid = m.id 
              WHERE messages_fts MATCH ?1 
-             ORDER BY m.timestamp DESC"
+             ORDER BY m.timestamp DESC",
         )?;
-        let rows = stmt.query_map(params![query], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
-        
+        let rows = stmt.query_map(params![query], |row| Ok((row.get(0)?, row.get(1)?)))?;
+
         let mut results = Vec::new();
         for r in rows {
             results.push(r?);
@@ -176,7 +191,9 @@ impl StateDB {
     }
 
     pub fn get_evidence(&self, session_id: &str) -> Result<Vec<EvidenceRecord>> {
-        let mut stmt = self.conn.prepare("SELECT id, kind, summary, captured_at FROM evidence WHERE session_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, kind, summary, captured_at FROM evidence WHERE session_id = ?1")?;
         let rows = stmt.query_map(params![session_id], |row| {
             let id_str: String = row.get(0)?;
             let kind: String = row.get(1)?;
@@ -187,7 +204,8 @@ impl StateDB {
                 mission_id: Default::default(), // Backwards compat or drop field
                 kind,
                 summary,
-                captured_at: OffsetDateTime::from_unix_timestamp(captured_at as i64).unwrap_or_else(|_| OffsetDateTime::now_utc()),
+                captured_at: OffsetDateTime::from_unix_timestamp(captured_at as i64)
+                    .unwrap_or_else(|_| OffsetDateTime::now_utc()),
             })
         })?;
 

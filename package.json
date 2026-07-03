@@ -16,7 +16,10 @@
     "docs/",
     "examples/",
     "scripts/",
-    "requirements-report.txt"
+    "requirements-report.txt",
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/"
   ],
   "scripts": {
     "build": "cargo build --workspace",

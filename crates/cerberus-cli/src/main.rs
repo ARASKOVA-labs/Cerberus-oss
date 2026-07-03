@@ -4,6 +4,7 @@ use cerberus_llm::{GlobalConfig, LlmClient, LlmConfig};
 use cerberus_memory::EvidenceRecord;
 use cerberus_policy::{PolicyDecision, PolicyEngine, RiskLevel};
 use clap::{Args, Parser, Subcommand};
+use dialoguer::{theme::ColorfulTheme, Input, Select};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -12,7 +13,6 @@ use std::{
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
-use dialoguer::{theme::ColorfulTheme, Input, Select};
 
 mod tui;
 
@@ -97,7 +97,7 @@ struct ReviewArgs {
     /// Target path to review.
     #[arg(default_value = ".")]
     target: String,
-    
+
     /// Run in CI mode (disables interactive dashboard and prints raw text).
     #[arg(long)]
     ci: bool,
@@ -229,19 +229,19 @@ async fn main() -> Result<()> {
                 }
             };
             println!("Analyzing target: {} ...", args.target);
-            
+
             // Execute `git diff` on the target path
             let mut diff_cmd = ProcessCommand::new("git");
             diff_cmd.arg("diff").arg("HEAD").arg(&args.target);
             let mut output = diff_cmd.output()?;
-            
+
             if !output.status.success() {
                 // Fallback for brand new repos without a HEAD commit
                 diff_cmd = ProcessCommand::new("git");
                 diff_cmd.arg("diff").arg(&args.target);
                 output = diff_cmd.output()?;
             }
-                
+
             let diff = String::from_utf8_lossy(&output.stdout);
             if diff.trim().is_empty() {
                 println!("No uncommitted changes found for target.");
@@ -250,7 +250,7 @@ async fn main() -> Result<()> {
 
             let client = cerberus_llm::LlmClient::new(llm);
             let prompt = format!("Review this code diff for security vulnerabilities based on OWASP standards:\n\n{}\n\nIMPORTANT: For any vulnerability found, you MUST provide 'original_code' (the exact vulnerable snippet as it appears in the file, maintaining exact whitespace) and 'replacement_code' (the secure fix).", diff);
-            
+
             match client.ask(&prompt).await {
                 Ok(res) => {
                     // Extract JSON array between [ and ]
@@ -268,13 +268,18 @@ async fn main() -> Result<()> {
                                 println!("\n[CERBERUS AUTOMATED FIX ENGINE]");
                                 let mut patched = 0;
                                 for v in &vulns {
-                                    if let (Some(orig), Some(rep)) = (&v.original_code, &v.replacement_code) {
+                                    if let (Some(orig), Some(rep)) =
+                                        (&v.original_code, &v.replacement_code)
+                                    {
                                         let target_file = Path::new(&v.file);
                                         if let Ok(content) = fs::read_to_string(target_file) {
                                             if content.contains(orig) {
                                                 let new_content = content.replace(orig, rep);
                                                 if fs::write(target_file, new_content).is_ok() {
-                                                    println!("✅ Patched vulnerability in {}", v.file);
+                                                    println!(
+                                                        "✅ Patched vulnerability in {}",
+                                                        v.file
+                                                    );
                                                     patched += 1;
                                                 } else {
                                                     println!("❌ Failed to write to {}", v.file);
@@ -294,7 +299,12 @@ async fn main() -> Result<()> {
                                 } else {
                                     println!("\n[CERBERUS SECURITY REVIEW]\n🚨 Found {} vulnerabilities:\n", vulns.len());
                                     for v in vulns {
-                                        println!("- [{}] {}: {}", v.severity.to_uppercase(), v.file, v.description);
+                                        println!(
+                                            "- [{}] {}: {}",
+                                            v.severity.to_uppercase(),
+                                            v.file,
+                                            v.description
+                                        );
                                         println!("  Remediation: {}\n", v.remediation);
                                     }
                                 }
@@ -315,30 +325,34 @@ async fn main() -> Result<()> {
         Command::Test(args) => {
             let llm = LlmConfig::from_env(None, None)?;
             println!("Generating security tests for target: {} ...", args.target);
-            
+
             let client = cerberus_llm::LlmClient::new(llm);
             let prompt = format!("Generate an automated security test script (like Selenium or Python requests) to test this target for common vulnerabilities: {}", args.target);
-            
+
             match client.ask(&prompt).await {
                 Ok(res) => println!("\n[CERBERUS AUTOMATED TEST GENERATOR]\n\n{}", res),
                 Err(e) => eprintln!("Failed to generate tests: {}", e),
             }
         }
         Command::Setup => {
-            let selections = &["Anthropic (Claude 3.5 Sonnet)", "OpenAI (GPT-4o)", "Local (Ollama / LMStudio)"];
+            let selections = &[
+                "Anthropic (Claude 3.5 Sonnet)",
+                "OpenAI (GPT-4o)",
+                "Local (Ollama / LMStudio)",
+            ];
             let selection = dialoguer::Select::new()
                 .with_prompt("Select LLM Provider")
                 .default(0)
                 .items(&selections[..])
                 .interact()?;
-            
+
             let provider = match selection {
                 0 => "anthropic",
                 1 => "openai",
                 2 => "openai-compatible",
                 _ => "offline",
             };
-            
+
             let config_content = format!("[llm]\nprovider = \"{}\"\n", provider);
             let workspace = Workspace::default();
             workspace.ensure()?;
@@ -354,7 +368,7 @@ async fn main() -> Result<()> {
                         println!("Starting Telegram gateway...");
                         let db_path = workspace.root.join("state.db");
                         let db = std::sync::Arc::new(tokio::sync::Mutex::new(
-                            cerberus_memory::StateDB::new(db_path).unwrap()
+                            cerberus_memory::StateDB::new(db_path).unwrap(),
                         ));
                         cerberus_gateway::run_telegram_bot(t, db).await?;
                     } else {
@@ -362,15 +376,20 @@ async fn main() -> Result<()> {
                     }
                 } else if platform == "whatsapp" {
                     println!("Starting WhatsApp gateway...");
-                    let mut bridge = cerberus_gateway::whatsapp::WhatsappBridge::start(std::env::current_dir()?)?;
+                    let mut bridge = cerberus_gateway::whatsapp::WhatsappBridge::start(
+                        std::env::current_dir()?,
+                    )?;
                     tokio::signal::ctrl_c().await?;
                     println!("Stopping WhatsApp bridge...");
                     bridge.stop()?;
                 } else {
-                    eprintln!("Unknown platform: {}. Use 'telegram' or 'whatsapp'.", platform);
+                    eprintln!(
+                        "Unknown platform: {}. Use 'telegram' or 'whatsapp'.",
+                        platform
+                    );
                 }
             }
-        }
+        },
         Command::Doctor => {
             let logo = r#"
              ___________________
@@ -656,13 +675,18 @@ impl Workspace {
     pub(crate) fn save_mission(&mut self, mission: &Mission) -> Result<()> {
         self.ensure()?;
         let json = serde_json::to_string(mission)?;
-        self.db.set_mission("default", &json).map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        self.db
+            .set_mission("default", &json)
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         write_json(&self.mission_file, mission)?;
         Ok(())
     }
 
     pub(crate) fn load_mission(&self) -> Result<Mission> {
-        let data = self.db.get_mission("default").map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        let data = self
+            .db
+            .get_mission("default")
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         if let Some(json) = data {
             let m = serde_json::from_str(&json)?;
             Ok(m)
@@ -674,13 +698,18 @@ impl Workspace {
     pub(crate) fn save_plan(&self, plan: &AgentPlan) -> Result<()> {
         self.ensure()?;
         let json = serde_json::to_string(plan)?;
-        self.db.set_plan("default", &json).map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        self.db
+            .set_plan("default", &json)
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         write_json(&self.plan_file, plan)?;
         Ok(())
     }
 
     pub(crate) fn load_plan(&self) -> Result<AgentPlan> {
-        let data = self.db.get_plan("default").map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        let data = self
+            .db
+            .get_plan("default")
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         if let Some(json) = data {
             let p = serde_json::from_str(&json)?;
             Ok(p)
@@ -690,7 +719,10 @@ impl Workspace {
     }
 
     pub(crate) fn load_evidence(&self) -> Result<Vec<cerberus_memory::EvidenceRecord>> {
-        let evs = self.db.get_evidence("default").map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        let evs = self
+            .db
+            .get_evidence("default")
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         Ok(evs)
     }
 
@@ -708,15 +740,20 @@ impl Workspace {
             summary: summary.into(),
             captured_at: OffsetDateTime::now_utc(),
         };
-        self.db.insert_evidence("default", &record).map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
-        
+        self.db
+            .insert_evidence("default", &record)
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+
         let evs = self.load_evidence()?;
         write_json(&self.evidence_file, &evs)?;
         Ok(record)
     }
 
     pub(crate) fn load_findings(&self) -> Result<Vec<Finding>> {
-        let rows = self.db.get_findings("default").map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        let rows = self
+            .db
+            .get_findings("default")
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         let mut results = Vec::new();
         for r in rows {
             results.push(serde_json::from_str(&r)?);
@@ -727,14 +764,20 @@ impl Workspace {
     pub(crate) fn add_finding(&self, finding: Finding) -> Result<()> {
         self.ensure()?;
         let json = serde_json::to_string(&finding)?;
-        self.db.save_finding("default", &finding.id.to_string(), &json).map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
-        
+        self.db
+            .save_finding("default", &finding.id.to_string(), &json)
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+
         let f = self.load_findings()?;
         write_json(&self.findings_file, &f)?;
         Ok(())
     }
 
-    pub(crate) fn verify_findings(&self, finding_id: Option<Uuid>, evidence_id: Uuid) -> Result<Vec<Uuid>> {
+    pub(crate) fn verify_findings(
+        &self,
+        finding_id: Option<Uuid>,
+        evidence_id: Uuid,
+    ) -> Result<Vec<Uuid>> {
         let mut findings = self.load_findings()?;
         let mut verified = Vec::new();
         for finding in &mut findings {
@@ -744,15 +787,17 @@ impl Workspace {
                 finding.verified_at = Some(OffsetDateTime::now_utc());
                 finding.evidence_ids.push(evidence_id);
                 verified.push(finding.id);
-                
+
                 let json = serde_json::to_string(finding)?;
-                self.db.save_finding("default", &finding.id.to_string(), &json).map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+                self.db
+                    .save_finding("default", &finding.id.to_string(), &json)
+                    .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
             }
         }
         if finding_id.is_some() && verified.is_empty() {
             bail!("no open finding matched the requested ID");
         }
-        
+
         let f = self.load_findings()?;
         write_json(&self.findings_file, &f)?;
         Ok(verified)
@@ -766,7 +811,7 @@ pub(crate) fn run_active_plan(workspace: &Workspace, mission: &Mission) -> Resul
 
     for step in plan.steps {
         let decision = policy.decide(step.risk);
-        
+
         let mut final_decision = decision.clone();
         if let PolicyDecision::RequireApproval { risk, reason } = &decision {
             use std::io::{self, Write};
@@ -777,14 +822,23 @@ pub(crate) fn run_active_plan(workspace: &Workspace, mission: &Mission) -> Resul
             if input.trim().eq_ignore_ascii_case("y") {
                 final_decision = PolicyDecision::Allow { risk: *risk };
             } else {
-                final_decision = PolicyDecision::Deny { risk: *risk, reason: "Operator denied via CLI".to_string() };
+                final_decision = PolicyDecision::Deny {
+                    risk: *risk,
+                    reason: "Operator denied via CLI".to_string(),
+                };
             }
         }
 
         let evidence_id = match final_decision {
-            PolicyDecision::Allow { .. } => {
-                Some(workspace.add_evidence(mission, format!("{:?}", step.kind), format!("Executed: {}", step.summary))?.id)
-            }
+            PolicyDecision::Allow { .. } => Some(
+                workspace
+                    .add_evidence(
+                        mission,
+                        format!("{:?}", step.kind),
+                        format!("Executed: {}", step.summary),
+                    )?
+                    .id,
+            ),
             _ => None,
         };
 
@@ -810,7 +864,7 @@ pub(crate) async fn generate_llm_plan(mission: &Mission) -> Result<AgentPlan> {
     if config.provider == cerberus_llm::LlmProvider::Offline {
         bail!("Offline mode, falling back to static plan");
     }
-    
+
     let client = cerberus_llm::LlmClient::new(config);
     let prompt = format!(
         "Plan an active security mission for this objective: {}. 
@@ -822,7 +876,7 @@ pub(crate) async fn generate_llm_plan(mission: &Mission) -> Result<AgentPlan> {
         mission.objective
     );
     let response = client.ask(&prompt).await?;
-    
+
     // Parse the JSON array
     #[derive(serde::Deserialize)]
     struct LlmStep {
@@ -839,9 +893,14 @@ pub(crate) async fn generate_llm_plan(mission: &Mission) -> Result<AgentPlan> {
     } else {
         response.trim()
     };
-    
-    let parsed_steps: Vec<LlmStep> = serde_json::from_str(clean_json)
-        .map_err(|e| anyhow::anyhow!("Failed to parse LLM JSON: {}\nRAW RESPONSE:\n{}", e, response))?;
+
+    let parsed_steps: Vec<LlmStep> = serde_json::from_str(clean_json).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to parse LLM JSON: {}\nRAW RESPONSE:\n{}",
+            e,
+            response
+        )
+    })?;
 
     let policy = PolicyEngine::default();
     let steps = parsed_steps
@@ -1021,7 +1080,11 @@ fn run_setup() -> Result<()> {
     let (provider_str, default_model, default_url) = match selection {
         0 => ("openai-compatible", "llama3", "http://127.0.0.1:11434"),
         1 => ("openai", "gpt-4o", "https://api.openai.com"),
-        2 => ("anthropic", "claude-3-5-sonnet-20240620", "https://api.anthropic.com"),
+        2 => (
+            "anthropic",
+            "claude-3-5-sonnet-20240620",
+            "https://api.anthropic.com",
+        ),
         _ => unreachable!(),
     };
 
@@ -1036,8 +1099,15 @@ fn run_setup() -> Result<()> {
         .interact_text()?;
 
     let api_key_env = if selection != 0 {
-        let env_name = if selection == 1 { "OPENAI_API_KEY" } else { "ANTHROPIC_API_KEY" };
-        println!("\nPlease ensure the environment variable {} is set before running Cerberus.", env_name);
+        let env_name = if selection == 1 {
+            "OPENAI_API_KEY"
+        } else {
+            "ANTHROPIC_API_KEY"
+        };
+        println!(
+            "\nPlease ensure the environment variable {} is set before running Cerberus.",
+            env_name
+        );
         Some(env_name.into())
     } else {
         None
@@ -1051,6 +1121,9 @@ fn run_setup() -> Result<()> {
     };
 
     config.save()?;
-    println!("\n✅ Configuration saved securely to: {}\n", GlobalConfig::config_path()?.display());
+    println!(
+        "\n✅ Configuration saved securely to: {}\n",
+        GlobalConfig::config_path()?.display()
+    );
     Ok(())
 }

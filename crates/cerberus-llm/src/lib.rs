@@ -50,12 +50,18 @@ pub struct LlmConfig {
 impl LlmConfig {
     pub fn from_env(provider_override: Option<&str>, model_override: Option<&str>) -> Result<Self> {
         if let Some(value) = provider_override {
-            return Ok(Self::build_config(LlmProvider::parse(value)?, model_override));
+            return Ok(Self::build_config(
+                LlmProvider::parse(value)?,
+                model_override,
+            ));
         }
 
         // 1. Try environment variables first
         if let Ok(env_provider) = env::var("CERBERUS_LLM_PROVIDER") {
-            return Ok(Self::build_config(LlmProvider::parse(&env_provider)?, model_override));
+            return Ok(Self::build_config(
+                LlmProvider::parse(&env_provider)?,
+                model_override,
+            ));
         }
 
         // 2. Fall back to global config
@@ -64,7 +70,9 @@ impl LlmConfig {
         }
 
         // 3. Fail if neither is found
-        Err(anyhow::anyhow!("Configuration not found. Please run setup."))
+        Err(anyhow::anyhow!(
+            "Configuration not found. Please run setup."
+        ))
     }
 
     fn build_config(provider: LlmProvider, model_override: Option<&str>) -> Self {
