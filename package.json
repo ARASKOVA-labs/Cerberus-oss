@@ -1,5 +1,5 @@
 {
-  "name": "araskova-cerberus",
+  "name": "@araskovalabs/cerberus",
   "version": "0.1.0",
   "description": "Cerberus — terminal-first agentic security framework by Araskova Labs.",
   "author": "Araskova Labs",
