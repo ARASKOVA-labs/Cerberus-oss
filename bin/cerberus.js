@@ -7,20 +7,19 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const args = process.argv.slice(2);
 
-const cargoArgs = ['run', '-q', '-p', 'cerberus-cli', '--', ...args];
-const command = process.platform === 'win32' ? 'cmd.exe' : 'cargo';
-const commandArgs = process.platform === 'win32'
-  ? ['/d', '/s', '/c', 'cargo', ...cargoArgs]
-  : cargoArgs;
+const isWindows = process.platform === 'win32';
+const binName = isWindows ? 'cerberus.exe' : 'cerberus';
+const binPath = path.join(root, 'target', 'release', binName);
 
-const result = spawnSync(command, commandArgs, {
-  cwd: root,
+const result = spawnSync(binPath, args, {
+  cwd: process.cwd(),
   stdio: 'inherit',
   shell: false,
 });
 
 if (result.error) {
   console.error(`cerberus: failed to launch Rust CLI: ${result.error.message}`);
+  console.error(`Please ensure you ran 'npm install' so the postinstall script builds the binary.`);
   process.exit(1);
 }
 

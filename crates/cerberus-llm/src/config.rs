@@ -10,6 +10,7 @@ pub struct GlobalConfig {
     pub model: String,
     pub base_url: String,
     pub api_key_env: Option<String>,
+    pub api_key: Option<String>,
 }
 
 impl GlobalConfig {
@@ -41,6 +42,7 @@ impl GlobalConfig {
             model: self.model.clone(),
             base_url: self.base_url.clone(),
             api_key_env: self.api_key_env.clone(),
+            api_key: self.api_key.clone(),
         })
     }
 }

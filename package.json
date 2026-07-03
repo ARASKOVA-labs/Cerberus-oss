@@ -1,6 +1,6 @@
 {
   "name": "@araskovalabs/cerberus",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cerberus — terminal-first agentic security framework by Araskova Labs.",
   "author": "Araskova Labs",
   "license": "UNLICENSED",
@@ -25,7 +25,8 @@
     "build": "cargo build --workspace",
     "check": "cargo check --workspace",
     "dev": "cargo run -p cerberus-cli -- console",
-    "doctor": "cargo run -p cerberus-cli -- doctor"
+    "doctor": "cargo run -p cerberus-cli -- doctor",
+    "postinstall": "cargo build --release --workspace"
   },
   "keywords": [
     "security",

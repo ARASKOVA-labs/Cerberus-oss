@@ -11,6 +11,7 @@ pub enum LlmProvider {
     Anthropic,
     OpenAi,
     OpenAiCompatible,
+    OpenRouter,
     Offline,
 }
 
@@ -22,6 +23,7 @@ impl LlmProvider {
             "openai-compatible" | "compatible" | "local" | "lmstudio" | "ollama" => {
                 Ok(Self::OpenAiCompatible)
             }
+            "openrouter" => Ok(Self::OpenRouter),
             "offline" | "none" => Ok(Self::Offline),
             other => Err(anyhow!("unknown LLM provider: {other}")),
         }
@@ -34,6 +36,7 @@ impl fmt::Display for LlmProvider {
             Self::Anthropic => write!(f, "anthropic"),
             Self::OpenAi => write!(f, "openai"),
             Self::OpenAiCompatible => write!(f, "openai-compatible"),
+            Self::OpenRouter => write!(f, "openrouter"),
             Self::Offline => write!(f, "offline"),
         }
     }
@@ -45,6 +48,7 @@ pub struct LlmConfig {
     pub model: String,
     pub base_url: String,
     pub api_key_env: Option<String>,
+    pub api_key: Option<String>,
 }
 
 impl LlmConfig {
@@ -86,6 +90,7 @@ impl LlmConfig {
                 base_url: env::var("ANTHROPIC_BASE_URL")
                     .unwrap_or_else(|_| "https://api.anthropic.com".to_string()),
                 api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                api_key: None,
             },
             LlmProvider::OpenAi => Self {
                 provider,
@@ -96,6 +101,18 @@ impl LlmConfig {
                 base_url: env::var("OPENAI_BASE_URL")
                     .unwrap_or_else(|_| "https://api.openai.com".to_string()),
                 api_key_env: Some("OPENAI_API_KEY".to_string()),
+                api_key: None,
+            },
+            LlmProvider::OpenRouter => Self {
+                provider,
+                model: model_override
+                    .map(ToOwned::to_owned)
+                    .or_else(|| env::var("OPENROUTER_MODEL").ok())
+                    .unwrap_or_else(|| "openai/gpt-4o-mini".to_string()),
+                base_url: env::var("OPENROUTER_BASE_URL")
+                    .unwrap_or_else(|_| "https://openrouter.ai/api".to_string()),
+                api_key_env: Some("OPENROUTER_API_KEY".to_string()),
+                api_key: None,
             },
             LlmProvider::OpenAiCompatible => Self {
                 provider,
@@ -106,17 +123,22 @@ impl LlmConfig {
                 base_url: env::var("CERBERUS_LLM_BASE_URL")
                     .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()),
                 api_key_env: None,
+                api_key: None,
             },
             LlmProvider::Offline => Self {
                 provider,
                 model: "offline".to_string(),
                 base_url: "offline".to_string(),
                 api_key_env: None,
+                api_key: None,
             },
         }
     }
 
     pub fn api_key_present(&self) -> bool {
+        if self.api_key.is_some() {
+            return true;
+        }
         self.api_key_env
             .as_ref()
             .and_then(|name| env::var(name).ok())
@@ -154,16 +176,22 @@ impl LlmClient {
     }
 
     pub async fn ask(&self, prompt: &str) -> Result<String> {
+        self.ask_with_system(&cerberus_persona(), prompt).await
+    }
+
+    pub async fn ask_with_system(&self, system: &str, prompt: &str) -> Result<String> {
         match self.config.provider {
             LlmProvider::Offline => {
                 Ok("Cerberus is offline. Configure CERBERUS_LLM_PROVIDER.".to_string())
             }
-            LlmProvider::Anthropic => self.ask_anthropic(prompt).await,
-            LlmProvider::OpenAi | LlmProvider::OpenAiCompatible => self.ask_openai(prompt).await,
+            LlmProvider::Anthropic => self.ask_anthropic(system, prompt).await,
+            LlmProvider::OpenAi | LlmProvider::OpenAiCompatible | LlmProvider::OpenRouter => {
+                self.ask_openai(system, prompt).await
+            }
         }
     }
 
-    async fn ask_anthropic(&self, prompt: &str) -> Result<String> {
+    async fn ask_anthropic(&self, system: &str, prompt: &str) -> Result<String> {
         let key = self.required_key()?;
         let response: Value = self
             .http
@@ -176,7 +204,7 @@ impl LlmClient {
             .json(&json!({
                 "model": self.config.model,
                 "max_tokens": 1024,
-                "system": cerberus_persona(),
+                "system": system,
                 "messages": [{ "role": "user", "content": prompt }]
             }))
             .send()
@@ -191,7 +219,7 @@ impl LlmClient {
             .unwrap_or_else(|| response.to_string()))
     }
 
-    async fn ask_openai(&self, prompt: &str) -> Result<String> {
+    async fn ask_openai(&self, system: &str, prompt: &str) -> Result<String> {
         let mut request = self
             .http
             .post(format!(
@@ -202,7 +230,7 @@ impl LlmClient {
                 "model": self.config.model,
                 "stream": false,
                 "messages": [
-                    { "role": "system", "content": cerberus_persona() },
+                    { "role": "system", "content": system },
                     { "role": "user", "content": prompt }
                 ]
             }));
@@ -212,12 +240,16 @@ impl LlmClient {
         }
 
         let response: Value = request.send().await?.error_for_status()?.json().await?;
-        // Debugging the raw response
-        // println!("Raw LLM Response: {}", response);
-        Ok(response["choices"][0]["message"]["content"]
-            .as_str()
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| response.to_string()))
+        
+        let message = &response["choices"][0]["message"];
+        let content = message["content"].as_str().unwrap_or("").trim();
+        let reasoning = message["reasoning"].as_str().unwrap_or("").trim();
+
+        if content.is_empty() && !reasoning.is_empty() {
+            return Ok(format!("*(The model ran out of tokens while thinking. Here is its internal reasoning)*\n\n{}", reasoning));
+        }
+
+        Ok(content.to_string())
     }
 
     fn required_key(&self) -> Result<String> {
@@ -226,6 +258,11 @@ impl LlmClient {
     }
 
     fn optional_key(&self) -> Option<String> {
+        if let Some(key) = &self.config.api_key {
+            if !key.trim().is_empty() {
+                return Some(key.clone());
+            }
+        }
         self.config
             .api_key_env
             .as_ref()
@@ -237,7 +274,12 @@ impl LlmClient {
 pub fn cerberus_persona() -> String {
     "You are Cerberus, an automated security analysis engine.
 Your role is to act as a strict security reviewer for code diffs and to generate automated security tests.
-You strictly enforce OWASP Top 10 and SOC2 compliance.
+You strictly enforce OWASP Top 10, SOC2 compliance, and AI/ML Security guidelines.
+You must specifically scan for and highlight:
+1. Scripting Attacks (XSS, SQLi, Command Injection).
+2. Modern OWASP 2025 Threats (Software Supply Chain Failures, Mishandling of Exceptional Conditions).
+3. LLM-specific Threats (Prompt Injection, System Prompt Leakage, Excessive Agency, Unbounded Consumption).
+4. Adversarial Data Poisoning (in AI pipelines).
 When given a code diff, you MUST output a raw JSON array of vulnerabilities. Do not use conversational filler or markdown blocks.
 JSON Format:
 [

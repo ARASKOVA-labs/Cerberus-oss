@@ -1,10 +1,10 @@
 use anyhow::{bail, Context, Result};
 use cerberus_core::{AgentKernel, AgentPlan, Mission};
 use cerberus_llm::{GlobalConfig, LlmClient, LlmConfig};
-use cerberus_memory::EvidenceRecord;
 use cerberus_policy::{PolicyDecision, PolicyEngine, RiskLevel};
 use clap::{Args, Parser, Subcommand};
-use dialoguer::{theme::ColorfulTheme, Input, Select};
+use dialoguer::{theme::ColorfulTheme, Input, Password, Select};
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -77,6 +77,8 @@ enum Command {
         #[command(subcommand)]
         command: LlmCommand,
     },
+    /// Run an automated penetration test and threat model on a target.
+    Pentest(PentestArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -110,6 +112,12 @@ struct ReviewArgs {
 #[derive(Debug, Args)]
 struct TestArgs {
     /// Target URL or module to test.
+    target: String,
+}
+
+#[derive(Debug, Args)]
+struct PentestArgs {
+    /// Target URL, IP, or repository path.
     target: String,
 }
 
@@ -216,9 +224,19 @@ struct Vulnerability {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let args = Cli::parse();
 
-    match cli.command {
+    println!(r#"
+  ██████╗███████╗██████╗ ██████╗ ███████╗██████╗ ██╗   ██╗███████╗
+ ██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██║   ██║██╔════╝
+ ██║     █████╗  ██████╔╝██████╔╝█████╗  ██████╔╝██║   ██║███████╗
+ ██║     ██╔══╝  ██╔══██╗██╔══██╗██╔══╝  ██╔══██╗██║   ██║╚════██║
+ ╚██████╗███████╗██║  ██║██████╔╝███████╗██║  ██║╚██████╔╝███████║
+  ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝
+      ARASKOVA LABS // AUTONOMOUS SECURITY RUNTIME
+"#);
+
+    match args.command {
         Command::Review(args) => {
             let llm = match LlmConfig::from_env(None, None) {
                 Ok(config) => config,
@@ -251,7 +269,20 @@ async fn main() -> Result<()> {
             let client = cerberus_llm::LlmClient::new(llm);
             let prompt = format!("Review this code diff for security vulnerabilities based on OWASP standards:\n\n{}\n\nIMPORTANT: For any vulnerability found, you MUST provide 'original_code' (the exact vulnerable snippet as it appears in the file, maintaining exact whitespace) and 'replacement_code' (the secure fix).", diff);
 
-            match client.ask(&prompt).await {
+            let spinner = ProgressBar::new_spinner();
+            spinner.set_style(
+                ProgressStyle::default_spinner()
+                    .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+                    .template("{spinner:.green} {msg}")
+                    .unwrap(),
+            );
+            spinner.set_message("Cerberus AI is analyzing the code diff...");
+            spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
+            let llm_res = client.ask(&prompt).await;
+            spinner.finish_and_clear();
+
+            match llm_res {
                 Ok(res) => {
                     // Extract JSON array between [ and ]
                     let start_idx = res.find('[').unwrap_or(0);
@@ -327,37 +358,61 @@ async fn main() -> Result<()> {
             println!("Generating security tests for target: {} ...", args.target);
 
             let client = cerberus_llm::LlmClient::new(llm);
+            let system = "You are Cerberus, an automated security testing engine. You strictly generate security test scripts (like Python requests or selenium) to validate targets against OWASP Top 10 vulnerabilities. Respond only with the test script and concise markdown instructions. Never output JSON diffs. Do NOT use markdown tables.";
             let prompt = format!("Generate an automated security test script (like Selenium or Python requests) to test this target for common vulnerabilities: {}", args.target);
 
-            match client.ask(&prompt).await {
-                Ok(res) => println!("\n[CERBERUS AUTOMATED TEST GENERATOR]\n\n{}", res),
+            let spinner = ProgressBar::new_spinner();
+            spinner.set_style(
+                ProgressStyle::default_spinner()
+                    .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+                    .template("{spinner:.blue} {msg}")
+                    .unwrap(),
+            );
+            spinner.set_message("Generating security test scripts...");
+            spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
+            let llm_res = client.ask_with_system(system, &prompt).await;
+            spinner.finish_and_clear();
+
+            match llm_res {
+                Ok(res) => {
+                    println!("\n[CERBERUS AUTOMATED TEST GENERATOR]\n");
+                    termimad::print_text(&res);
+                }
                 Err(e) => eprintln!("Failed to generate tests: {}", e),
             }
         }
+        Command::Pentest(args) => {
+            let llm = LlmConfig::from_env(None, None)?;
+            println!("Initiating deep pentest on target: {} ...", args.target);
+
+            let client = cerberus_llm::LlmClient::new(llm);
+            let system = "You are Cerberus, an elite AI penetration tester and threat modeling engine. You output professional Markdown reports analyzing targets for advanced attack vectors, prioritizing OWASP Top 10 (2025) and LLM vulnerabilities. Do not use JSON diffs. Do NOT use markdown tables, as they render poorly in narrow terminals. Use clean bullet points and headers instead.";
+            let prompt = format!("Perform a deep architectural threat model and penetration testing reconnaissance simulation for the following target: {}\n\nOutline potential attack vectors, exploit chains, and severe vulnerabilities. You must specifically evaluate immunity to Scripting Attacks, modern OWASP 2025 threats (Supply Chain Failures, Exceptional Condition Mishandling), and LLM Vulnerabilities (Prompt Injection, Excessive Agency, System Prompt Leakage, Data Poisoning).\nFormat the output as a professional penetration test summary report in Markdown.", args.target);
+
+            let spinner = ProgressBar::new_spinner();
+            spinner.set_style(
+                ProgressStyle::default_spinner()
+                    .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+                    .template("{spinner:.red} {msg}")
+                    .unwrap(),
+            );
+            spinner.set_message("Executing reconnaissance and threat modeling phase...");
+            spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
+            let llm_res = client.ask_with_system(system, &prompt).await;
+            spinner.finish_and_clear();
+
+            match llm_res {
+                Ok(res) => {
+                    println!("\n[CERBERUS PENTEST REPORT]\n");
+                    termimad::print_text(&res);
+                }
+                Err(e) => eprintln!("Failed to execute pentest: {}", e),
+            }
+        }
         Command::Setup => {
-            let selections = &[
-                "Anthropic (Claude 3.5 Sonnet)",
-                "OpenAI (GPT-4o)",
-                "Local (Ollama / LMStudio)",
-            ];
-            let selection = dialoguer::Select::new()
-                .with_prompt("Select LLM Provider")
-                .default(0)
-                .items(&selections[..])
-                .interact()?;
-
-            let provider = match selection {
-                0 => "anthropic",
-                1 => "openai",
-                2 => "openai-compatible",
-                _ => "offline",
-            };
-
-            let config_content = format!("[llm]\nprovider = \"{}\"\n", provider);
-            let workspace = Workspace::default();
-            workspace.ensure()?;
-            std::fs::write(workspace.root.join("config.toml"), config_content)?;
-            println!("Configuration saved to .cerberus/config.toml");
+            run_setup()?;
         }
         Command::Gateway { command } => match command {
             GatewayCommand::Start { platform, token } => {
@@ -655,6 +710,7 @@ pub(crate) struct Workspace {
 impl Default for Workspace {
     fn default() -> Self {
         let root = PathBuf::from(".cerberus");
+        fs::create_dir_all(&root).unwrap_or_default();
         Self {
             db: cerberus_memory::StateDB::new(root.join("state.db")).unwrap(),
             mission_file: root.join("mission.json"),
@@ -859,6 +915,7 @@ pub(crate) fn run_active_plan(workspace: &Workspace, mission: &Mission) -> Resul
     })
 }
 
+#[allow(dead_code)]
 pub(crate) async fn generate_llm_plan(mission: &Mission) -> Result<AgentPlan> {
     let config = LlmConfig::from_env(None, None)?;
     if config.provider == cerberus_llm::LlmProvider::Offline {
@@ -1052,12 +1109,14 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     fs::write(path, data).with_context(|| format!("failed to write {}", path.display()))
 }
 
+#[allow(dead_code)]
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     let data =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     serde_json::from_str(&data).with_context(|| format!("failed to parse {}", path.display()))
 }
 
+#[allow(dead_code)]
 fn read_json_or_empty<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Vec<T>> {
     if !path.exists() {
         return Ok(Vec::new());
@@ -1070,7 +1129,12 @@ fn run_setup() -> Result<()> {
     println!("\n[CERBERUS AUTO-SETUP]");
     println!("Let's configure your AI engine!\n");
 
-    let providers = &["Ollama (Local/Offline)", "OpenAI", "Anthropic"];
+    let providers = &[
+        "Ollama (Local/Offline)",
+        "OpenAI",
+        "Anthropic",
+        "OpenRouter",
+    ];
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt("Select your preferred AI provider")
         .default(0)
@@ -1078,12 +1142,21 @@ fn run_setup() -> Result<()> {
         .interact()?;
 
     let (provider_str, default_model, default_url) = match selection {
-        0 => ("openai-compatible", "llama3", "http://127.0.0.1:11434"),
+        0 => (
+            "openai-compatible",
+            "qwen3.5:0.8b",
+            "http://127.0.0.1:11434",
+        ),
         1 => ("openai", "gpt-4o", "https://api.openai.com"),
         2 => (
             "anthropic",
             "claude-3-5-sonnet-20240620",
             "https://api.anthropic.com",
+        ),
+        3 => (
+            "openrouter",
+            "openai/gpt-4o-mini",
+            "https://openrouter.ai/api",
         ),
         _ => unreachable!(),
     };
@@ -1098,26 +1171,42 @@ fn run_setup() -> Result<()> {
         .default(default_url.into())
         .interact_text()?;
 
-    let api_key_env = if selection != 0 {
-        let env_name = if selection == 1 {
-            "OPENAI_API_KEY"
-        } else {
-            "ANTHROPIC_API_KEY"
+    let mut api_key_env = None;
+    let mut api_key = None;
+
+    if selection != 0 {
+        let env_name = match selection {
+            1 => "OPENAI_API_KEY",
+            2 => "ANTHROPIC_API_KEY",
+            3 => "OPENROUTER_API_KEY",
+            _ => "API_KEY",
         };
-        println!(
-            "\nPlease ensure the environment variable {} is set before running Cerberus.",
-            env_name
-        );
-        Some(env_name.into())
-    } else {
-        None
-    };
+
+        let key: String = Password::with_theme(&ColorfulTheme::default())
+            .with_prompt(format!(
+                "Enter your API Key (or leave blank to use {})",
+                env_name
+            ))
+            .allow_empty_password(true)
+            .interact()?;
+
+        if key.trim().is_empty() {
+            println!(
+                "\nPlease ensure the environment variable {} is set before running Cerberus.",
+                env_name
+            );
+            api_key_env = Some(env_name.into());
+        } else {
+            api_key = Some(key);
+        }
+    }
 
     let config = GlobalConfig {
         provider: provider_str.to_string(),
         model,
         base_url,
         api_key_env,
+        api_key,
     };
 
     config.save()?;
