@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{env, fmt};
 
+pub mod config;
+pub use config::GlobalConfig;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum LlmProvider {
     Anthropic,
@@ -46,30 +49,26 @@ pub struct LlmConfig {
 
 impl LlmConfig {
     pub fn from_env(provider_override: Option<&str>, model_override: Option<&str>) -> Result<Self> {
-        let toml_provider = std::fs::read_to_string(".cerberus/config.toml")
-            .ok()
-            .and_then(|content| {
-                content
-                    .lines()
-                    .find(|line| line.starts_with("provider ="))
-                    .and_then(|line| line.split('=').nth(1))
-                    .map(|v| v.trim().trim_matches('"').to_string())
-            });
+        if let Some(value) = provider_override {
+            return Ok(Self::build_config(LlmProvider::parse(value)?, model_override));
+        }
 
-        let provider = match provider_override {
-            Some(value) => LlmProvider::parse(value)?,
-            None => {
-                if let Some(p) = toml_provider {
-                    LlmProvider::parse(&p)?
-                } else {
-                    LlmProvider::parse(
-                        &env::var("CERBERUS_LLM_PROVIDER").unwrap_or_else(|_| "offline".to_string()),
-                    )?
-                }
-            }
-        };
+        // 1. Try environment variables first
+        if let Ok(env_provider) = env::var("CERBERUS_LLM_PROVIDER") {
+            return Ok(Self::build_config(LlmProvider::parse(&env_provider)?, model_override));
+        }
 
-        Ok(match provider {
+        // 2. Fall back to global config
+        if let Ok(global_cfg) = GlobalConfig::load() {
+            return global_cfg.to_llm_config();
+        }
+
+        // 3. Fail if neither is found
+        Err(anyhow::anyhow!("Configuration not found. Please run setup."))
+    }
+
+    fn build_config(provider: LlmProvider, model_override: Option<&str>) -> Self {
+        match provider {
             LlmProvider::Anthropic => Self {
                 provider,
                 model: model_override
@@ -98,15 +97,15 @@ impl LlmConfig {
                     .unwrap_or_else(|| "qwen3.5:0.8b".to_string()),
                 base_url: env::var("CERBERUS_LLM_BASE_URL")
                     .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()),
-                api_key_env: Some("CERBERUS_LLM_API_KEY".to_string()),
+                api_key_env: None,
             },
             LlmProvider::Offline => Self {
                 provider,
                 model: "offline".to_string(),
-                base_url: "local".to_string(),
+                base_url: "offline".to_string(),
                 api_key_env: None,
             },
-        })
+        }
     }
 
     pub fn api_key_present(&self) -> bool {
@@ -234,7 +233,14 @@ You strictly enforce OWASP Top 10 and SOC2 compliance.
 When given a code diff, you MUST output a raw JSON array of vulnerabilities. Do not use conversational filler or markdown blocks.
 JSON Format:
 [
-  { \"severity\": \"Low|Medium|High|Critical\", \"description\": \"<string>\", \"remediation\": \"<string>\", \"file\": \"<string>\" }
+  { 
+    \"severity\": \"Low|Medium|High|Critical\", 
+    \"description\": \"<string>\", 
+    \"remediation\": \"<string>\", 
+    \"file\": \"<string>\",
+    \"original_code\": \"<exact matching vulnerable lines from the file to replace>\",
+    \"replacement_code\": \"<secure code to insert>\"
+  }
 ]
 If there are no vulnerabilities, output an empty array: []
 Be extremely concise, output only actionable JSON, and never break character."

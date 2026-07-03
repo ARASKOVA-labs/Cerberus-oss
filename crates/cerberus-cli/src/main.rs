@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use cerberus_core::{AgentKernel, AgentPlan, Mission};
-use cerberus_llm::{LlmClient, LlmConfig};
+use cerberus_llm::{GlobalConfig, LlmClient, LlmConfig};
 use cerberus_memory::EvidenceRecord;
 use cerberus_policy::{PolicyDecision, PolicyEngine, RiskLevel};
 use clap::{Args, Parser, Subcommand};
@@ -12,6 +12,7 @@ use std::{
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
+use dialoguer::{theme::ColorfulTheme, Input, Select};
 
 mod tui;
 
@@ -100,6 +101,10 @@ struct ReviewArgs {
     /// Run in CI mode (disables interactive dashboard and prints raw text).
     #[arg(long)]
     ci: bool,
+
+    /// Automatically apply AI remediation code to local files.
+    #[arg(long)]
+    fix: bool,
 }
 
 #[derive(Debug, Args)]
@@ -205,6 +210,8 @@ struct Vulnerability {
     description: String,
     remediation: String,
     file: String,
+    original_code: Option<String>,
+    replacement_code: Option<String>,
 }
 
 #[tokio::main]
@@ -213,7 +220,14 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Review(args) => {
-            let llm = LlmConfig::from_env(None, None)?;
+            let llm = match LlmConfig::from_env(None, None) {
+                Ok(config) => config,
+                Err(_) => {
+                    println!("No configuration found. Launching setup wizard...");
+                    run_setup()?;
+                    LlmConfig::from_env(None, None)?
+                }
+            };
             println!("Analyzing target: {} ...", args.target);
             
             // Execute `git diff` on the target path
@@ -235,7 +249,7 @@ async fn main() -> Result<()> {
             }
 
             let client = cerberus_llm::LlmClient::new(llm);
-            let prompt = format!("Review this code diff for security vulnerabilities based on OWASP standards:\n\n{}", diff);
+            let prompt = format!("Review this code diff for security vulnerabilities based on OWASP standards:\n\n{}\n\nIMPORTANT: For any vulnerability found, you MUST provide 'original_code' (the exact vulnerable snippet as it appears in the file, maintaining exact whitespace) and 'replacement_code' (the secure fix).", diff);
             
             match client.ask(&prompt).await {
                 Ok(res) => {
@@ -250,7 +264,31 @@ async fn main() -> Result<()> {
 
                     match serde_json::from_str::<Vec<Vulnerability>>(clean_json) {
                         Ok(vulns) => {
-                            if args.ci {
+                            if args.fix {
+                                println!("\n[CERBERUS AUTOMATED FIX ENGINE]");
+                                let mut patched = 0;
+                                for v in &vulns {
+                                    if let (Some(orig), Some(rep)) = (&v.original_code, &v.replacement_code) {
+                                        let target_file = Path::new(&v.file);
+                                        if let Ok(content) = fs::read_to_string(target_file) {
+                                            if content.contains(orig) {
+                                                let new_content = content.replace(orig, rep);
+                                                if fs::write(target_file, new_content).is_ok() {
+                                                    println!("✅ Patched vulnerability in {}", v.file);
+                                                    patched += 1;
+                                                } else {
+                                                    println!("❌ Failed to write to {}", v.file);
+                                                }
+                                            } else {
+                                                println!("⚠️ Could not locate exact original code snippet in {}", v.file);
+                                            }
+                                        } else {
+                                            println!("⚠️ Could not read file {}", v.file);
+                                        }
+                                    }
+                                }
+                                println!("Applied {} fixes.", patched);
+                            } else if args.ci {
                                 if vulns.is_empty() {
                                     println!("\n[CERBERUS SECURITY REVIEW]\n✅ No vulnerabilities found!");
                                 } else {
@@ -965,5 +1003,54 @@ fn read_json_or_empty<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Vec<T
     if !path.exists() {
         return Ok(Vec::new());
     }
-    read_json(path)
+    let content = fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&content)?)
+}
+
+fn run_setup() -> Result<()> {
+    println!("\n[CERBERUS AUTO-SETUP]");
+    println!("Let's configure your AI engine!\n");
+
+    let providers = &["Ollama (Local/Offline)", "OpenAI", "Anthropic"];
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select your preferred AI provider")
+        .default(0)
+        .items(&providers[..])
+        .interact()?;
+
+    let (provider_str, default_model, default_url) = match selection {
+        0 => ("openai-compatible", "llama3", "http://127.0.0.1:11434"),
+        1 => ("openai", "gpt-4o", "https://api.openai.com"),
+        2 => ("anthropic", "claude-3-5-sonnet-20240620", "https://api.anthropic.com"),
+        _ => unreachable!(),
+    };
+
+    let model: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Model name")
+        .default(default_model.into())
+        .interact_text()?;
+
+    let base_url: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("API Base URL")
+        .default(default_url.into())
+        .interact_text()?;
+
+    let api_key_env = if selection != 0 {
+        let env_name = if selection == 1 { "OPENAI_API_KEY" } else { "ANTHROPIC_API_KEY" };
+        println!("\nPlease ensure the environment variable {} is set before running Cerberus.", env_name);
+        Some(env_name.into())
+    } else {
+        None
+    };
+
+    let config = GlobalConfig {
+        provider: provider_str.to_string(),
+        model,
+        base_url,
+        api_key_env,
+    };
+
+    config.save()?;
+    println!("\n✅ Configuration saved securely to: {}\n", GlobalConfig::config_path()?.display());
+    Ok(())
 }
