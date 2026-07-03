@@ -1,5 +1,5 @@
 {
-  "name": "@araskova/cerberus",
+  "name": "araskova-cerberus",
   "version": "0.1.0",
   "description": "Automated CI/CD AI Security Review & Testing Engine",
   "main": "bin/cerberus.js",

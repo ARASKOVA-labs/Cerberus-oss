@@ -7,7 +7,7 @@ All code within this repository (`araskova-labs/cerberus`) is strictly open-sour
 - **`cerberus-core`**: The mission state, memory logic, and vulnerability schemas.
 - **`cerberus-cli`**: The command-line interface and Git diff extraction logic.
 - **`cerberus-llm`**: The AI adapters that communicate with OpenAI, Anthropic, or local offline models.
-- **`@araskova/cerberus` (NPM Package)**: The Node.js binary wrapper used to seamlessly integrate Cerberus into standard CI/CD pipelines.
+- **`araskova-cerberus` (NPM Package)**: The Node.js binary wrapper used to seamlessly integrate Cerberus into standard CI/CD pipelines.
 
 We give this away for free because we believe every developer on the planet should have access to world-class automated AI security reviews natively in their terminal and pipelines.
 

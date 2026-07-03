@@ -12,7 +12,7 @@ The easiest way to integrate Cerberus into your workflow is via our NPM package 
 
 **Via NPM:**
 ```bash
-npm install -g @araskova/cerberus
+npm install -g araskova-cerberus
 ```
 
 **Via Cargo:**
